@@ -1,0 +1,92 @@
+-- Works with the existing TickRate instance you already created.
+-- • daySec       : real seconds Day should last  at BASE_TPS
+-- • nightSec     : real seconds Night should last at BASE_TPS
+-- • BASE_TPS     : reference TPS used when picking those seconds
+--
+--  Methods:
+--      bind(id,  fn)  -- called every Tick with (isDay, clockTime)
+--      onPhase(id, fnDay, fnNight) -- called **once** on phase change
+--      isDay()        -- boolean
+--      getClockTime() -- 0‑24
+
+local Lighting = game:GetService("Lighting")
+
+local DayNightService = {}
+DayNightService.__index = DayNightService
+
+function DayNightService.new(tickService, daySec, nightSec, BASE_TPS)
+	BASE_TPS     = BASE_TPS or 20
+	daySec       = daySec   or 600    -- 10 min @ BASE_TPS
+	nightSec     = nightSec or 300    -- 5 min  @ BASE_TPS
+
+	local self   = setmetatable({}, DayNightService)
+	self._tick   = tickService
+
+	self._dayTicks   = daySec   * BASE_TPS
+	self._nightTicks = nightSec * BASE_TPS
+	self._cycleTicks = self._dayTicks + self._nightTicks
+
+	self._phase      = nil      -- nil -> forces first update
+	self._listeners  = {}       -- per‑tick listeners
+	self._phaseHooks = {}       -- phase change hooks
+
+	tickService:bind("DayNightCore", function() self:_onTick() end)
+	return self
+end
+
+---------------------------------------------------------------- private
+function DayNightService:_onTick()
+	local tickCount = self._tick._tickCount
+	local phaseTick = tickCount % self._cycleTicks
+	
+	local isDay, pct
+	if phaseTick < self._dayTicks then
+		isDay = true
+		pct   = phaseTick / self._dayTicks        -- 0‑1 across Day
+	else
+		isDay = false
+		pct   = (phaseTick - self._dayTicks) / self._nightTicks -- 0‑1 Night
+	end
+
+	
+
+	-- Only update Lighting once per tick
+	Lighting.ClockTime = isDay
+		and (6 + pct * 12)         -- 06:00 → 18:00
+		or  (18 + pct * 12) % 24   -- 18:00 → 06:00
+
+	-- Fire phase hooks **once** on change
+	if isDay ~= self._phase then
+		self._phase = isDay
+		for _, h in pairs(self._phaseHooks) do
+			if isDay and h.day then  h.day()  elseif (not isDay) and h.night then h.night() end
+		end
+	end
+
+	-- Per‑tick listeners
+	for _, cb in pairs(self._listeners) do
+		cb(isDay, Lighting.ClockTime)
+	end
+end
+
+---------------------------------------------------------------- public
+function DayNightService:bind(id, fn)            self._listeners[id]  = fn end
+function DayNightService:unbind(id)              self._listeners[id]  = nil end
+
+function DayNightService:onPhase(id, fnDay, fnNight)
+	self._phaseHooks[id] = { day = fnDay, night = fnNight }
+end
+function DayNightService:removePhase(id)         self._phaseHooks[id] = nil end
+
+function DayNightService:isDay()     return self._phase end
+function DayNightService:getClockTime() return Lighting.ClockTime end
+
+function DayNightService:nextday(Custom :  number)
+	local currentday = (self._tick._tickCount)/ (self._cycleTicks)
+	local timeinday = math.floor((currentday % 1) * 100) / 100
+
+	self._tick._tickCount += (self._cycleTicks * (0.98 - timeinday))
+end
+
+
+return DayNightService
