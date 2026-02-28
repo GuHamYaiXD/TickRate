@@ -1,4 +1,3 @@
--- Works with the existing TickRate instance you already created.
 -- • daySec       : real seconds Day should last  at BASE_TPS
 -- • nightSec     : real seconds Night should last at BASE_TPS
 -- • BASE_TPS     : reference TPS used when picking those seconds
